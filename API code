@@ -1,0 +1,77 @@
+function doGet(e) {
+  return handleRequest(e, null);
+}
+
+function doPost(e) {
+  return handleRequest(null, e);
+}
+
+function handleRequest(getReq, postReq) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Students");
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const data = sheet.getDataRange().getValues().slice(1);
+  
+  let method = "";
+  let payload = {};
+
+  if (getReq && getReq.parameter.method) {
+    method = getReq.parameter.method.toUpperCase();
+    payload = getReq.parameter;
+  } else if (postReq && postReq.postData) {
+    payload = JSON.parse(postReq.postData.contents);
+    method = payload.method.toUpperCase();
+  } else {
+    return jsonResponse({ status: "error", message: "Method not provided." });
+  }
+
+  switch (method) {
+    case "GET":
+      if (payload.id) {
+        const row = data.find(r => String(r[0]) === String(payload.id));
+        return jsonResponse(row ? objectify(headers, row) : {});
+      } else {
+        return jsonResponse(data.map(r => objectify(headers, r)));
+      }
+
+    case "POST":
+      const newId = generateId(sheet);
+      const newRow = [newId, payload.Name, payload.Age, payload.Course];
+      sheet.appendRow(newRow);
+      return jsonResponse({ status: "success", id: newId });
+
+    case "PUT":
+      if (!payload.ID) return jsonResponse({ status: "error", message: "Missing ID for update." });
+      const rowIndex = data.findIndex(r => String(r[0]) === String(payload.ID));
+      if (rowIndex === -1) return jsonResponse({ status: "error", message: "ID not found." });
+      const updatedRow = [payload.ID, payload.Name, payload.Age, payload.Course];
+      sheet.getRange(rowIndex + 2, 1, 1, updatedRow.length).setValues([updatedRow]);
+      return jsonResponse({ status: "updated", id: payload.ID });
+
+    case "DELETE":
+      if (!payload.ID) return jsonResponse({ status: "error", message: "Missing ID for deletion." });
+      const delIndex = data.findIndex(r => String(r[0]) === String(payload.ID));
+      if (delIndex === -1) return jsonResponse({ status: "error", message: "ID not found." });
+      sheet.deleteRow(delIndex + 2);
+      return jsonResponse({ status: "deleted", id: payload.ID });
+
+    default:
+      return jsonResponse({ status: "error", message: "Unknown method." });
+  }
+}
+
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function objectify(headers, row) {
+  let obj = {};
+  headers.forEach((h, i) => obj[h] = row[i]);
+  return obj;
+}
+
+function generateId(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const lastRow = data.length;
+  const lastId = data[lastRow - 1][0];
+  return typeof lastId === "number" ? lastId + 1 : lastRow;
+}
