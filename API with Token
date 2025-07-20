@@ -1,0 +1,102 @@
+// 🔐 Set your secure token here
+const ACCESS_TOKEN = "1234567890abcdef"; // Change this securely!
+
+function doGet(e) {
+  if (!isAuthorized(e)) return unauthorized();
+  return handleApi(e, null);
+}
+
+function doPost(e) {
+  if (!isAuthorized(e)) return unauthorized();
+  return handleApi(null, e);
+}
+
+function isAuthorized(req) {
+  let token = "";
+  try {
+    if (req?.parameter?.token) {
+      token = req.parameter.token;
+    } else if (req?.postData?.contents) {
+      const body = JSON.parse(req.postData.contents);
+      token = body.token || "";
+    }
+  } catch (err) {}
+  return token === ACCESS_TOKEN;
+}
+
+function unauthorized() {
+  return ContentService.createTextOutput(JSON.stringify({
+    status: "unauthorized",
+    message: "Invalid or missing access token"
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function handleApi(getReq, postReq) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Students");
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const rows = sheet.getDataRange().getValues().slice(1); // skip header
+
+  let method = "";
+  let data = {};
+
+  if (getReq?.parameter?.method) {
+    method = getReq.parameter.method.toUpperCase();
+    data = getReq.parameter;
+  } else if (postReq?.postData?.contents) {
+    data = JSON.parse(postReq.postData.contents);
+    method = data.method?.toUpperCase() || "";
+  } else {
+    return jsonResponse({ status: "error", message: "Method not provided." });
+  }
+
+  switch (method) {
+    case "GET":
+      if (data.id) {
+        const found = rows.find(r => String(r[0]) === String(data.id));
+        return jsonResponse(found ? toObject(headers, found) : {});
+      } else {
+        return jsonResponse(rows.map(r => toObject(headers, r)));
+      }
+
+    case "POST":
+      const newId = generateId(sheet);
+      const newRow = [newId, data.Name, data.Age, data.Course];
+      sheet.appendRow(newRow);
+      return jsonResponse({ status: "success", id: newId });
+
+    case "PUT":
+      if (!data.ID) return jsonResponse({ status: "error", message: "Missing ID." });
+      const putIndex = rows.findIndex(r => String(r[0]) === String(data.ID));
+      if (putIndex === -1) return jsonResponse({ status: "error", message: "ID not found." });
+      const updateRow = [data.ID, data.Name, data.Age, data.Course];
+      sheet.getRange(putIndex + 2, 1, 1, updateRow.length).setValues([updateRow]);
+      return jsonResponse({ status: "updated", id: data.ID });
+
+    case "DELETE":
+      if (!data.ID) return jsonResponse({ status: "error", message: "Missing ID." });
+      const delIndex = rows.findIndex(r => String(r[0]) === String(data.ID));
+      if (delIndex === -1) return jsonResponse({ status: "error", message: "ID not found." });
+      sheet.deleteRow(delIndex + 2);
+      return jsonResponse({ status: "deleted", id: data.ID });
+
+    default:
+      return jsonResponse({ status: "error", message: "Unknown method." });
+  }
+}
+
+function toObject(headers, row) {
+  let obj = {};
+  headers.forEach((h, i) => obj[h] = row[i]);
+  return obj;
+}
+
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function generateId(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const lastRow = data[data.length - 1];
+  const lastId = parseInt(lastRow[0]);
+  return isNaN(lastId) ? 1 : lastId + 1;
+}
